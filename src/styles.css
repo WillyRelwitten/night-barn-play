@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #050807;
+  --color-surface: #0d1610;
+  --color-fg: #d4edd0;
+  --color-muted: #7a9a74;
+  --color-primary: #9aff7a;
+  --color-border: #1c2a1e;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-display: "Barlow Condensed", "Arial Narrow", Impact, sans-serif;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    overflow: hidden;
+    overscroll-behavior: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-rise {
+    animation: none !important;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+.motion-rise {
+  animation: rise 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.nv-canvas {
+  /* NV look comes from scene lighting + overlays; CSS filters on WebGL canvases can composite black. */
+}
+
+.nv-scan {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgb(0 0 0 / 0%),
+    rgb(0 0 0 / 0%) 2px,
+    rgb(0 0 0 / 22%) 3px
+  );
+}
+
+.nv-scope {
+  background: radial-gradient(
+    circle closest-side at center,
+    rgb(0 0 0 / 0%) 64%,
+    rgb(4 16 8 / 28%) 78%,
+    rgb(0 0 0 / 82%) 92%,
+    rgb(0 0 0 / 100%) 100%
+  );
+}
