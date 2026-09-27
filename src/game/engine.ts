@@ -18,11 +18,14 @@ import {
   playFloorboard,
   playHit,
   playImpact,
+  playPerch,
   playShot,
   playStep,
   resumeAudio,
   setMasterMuted,
+  getFlash,
   getStorm,
+  tickFlash,
 } from "./audio";
 import { useGameStore } from "./store";
 
@@ -94,6 +97,10 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
   camera.add(ir.target);
   ir.target.position.set(0, -0.22, -5);
   scene.add(camera);
+  // Lightning: cool white wash that floods the barn on a strike.
+  const bolt = new THREE.DirectionalLight(0xd8e8ff, 0);
+  bolt.position.set(-8, 18, 6);
+  scene.add(bolt);
 
   const dustMotesGeo = new THREE.BufferGeometry();
   const moteCount = isTouch ? 40 : 90;
@@ -154,7 +161,16 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
 
   const barn = buildBarn(scene, tex);
   const mouseTpl = await loadMouseTemplate();
-  const mice = createMice(scene, barn.obstacles, barn.bounds, barn.cover, fur, barn.perches, mouseTpl);
+  const mice = createMice(
+    scene,
+    barn.obstacles,
+    barn.bounds,
+    barn.cover,
+    fur,
+    barn.perches,
+    mouseTpl,
+    () => playPerch(),
+  );
   const dust = createDust(scene);
   const moths = createMoths(scene);
 
@@ -174,6 +190,12 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
   let trauma = 0;
   let flash = 0;
   let lastFire = -10;
+  let boltT = 99;
+  let wary = 0;
+  let sessionT = 0;
+  let sessionKills = 0;
+  let prevFlash = 0;
+  let prevPhase = store.getState().phase;
   let distWalk = 0;
   let lastStep = 0;
   let joyX = 0;
@@ -227,6 +249,7 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
     playShot();
     playBoltCycle();
     flash = 1;
+    boltT = 0;
     recoilP += 0.048;
     recoilY += (Math.random() - 0.5) * 0.02;
     trauma = Math.min(1, trauma + 0.42);
@@ -248,6 +271,7 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
       const pt = mouseHits[0].point;
       if (mice.kill(id)) {
         playHit();
+        sessionKills += 1;
         store.getState().pulseHit();
         store.getState().addKill();
         dust.emit(pt.x, pt.y, pt.z, 16);
@@ -394,7 +418,24 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
     const phase = store.getState().phase;
     const playing = phase === "playing";
 
-    tmpLook.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+    // The barn learns: wariness grows with kills and time, resets on re-entry.
+    if (playing && prevPhase !== "playing") {
+      wary = 0;
+      sessionT = 0;
+      sessionKills = 0;
+    }
+    prevPhase = phase;
+    if (playing) {
+      sessionT += dt;
+      wary = Math.min(1, sessionKills * 0.07 + sessionT / 240);
+      mice.setWary(wary);
+    }
+
+    tmpLook.set(
+      -Math.sin(yaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      -Math.cos(yaw) * Math.cos(pitch),
+    );
     mice.update(dt, px, pz, tmpLook, PLAYER_HEIGHT, zoom || isDown("KeyC"));
     dust.update(dt);
     moths.update(dt);
@@ -442,6 +483,7 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
 
     recoilP *= Math.exp(-7 * dt);
     recoilY *= Math.exp(-7 * dt);
+    boltT += dt;
     trauma = Math.max(0, trauma - dt * 1.8);
     flash = Math.max(0, flash - dt * 6);
     exhausted = Math.max(0, exhausted - dt);
@@ -470,11 +512,12 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
       camera.updateProjectionMatrix();
     } else {
       const st = store.getState();
-      const still = (zoom || isDown("KeyC")) && (holdBtn || isDown("Space") || isDown("KeyF")) && exhausted <= 0;
+      const still =
+        (zoom || isDown("KeyC")) &&
+        (holdBtn || isDown("Space") || isDown("KeyF")) &&
+        exhausted <= 0;
       const bob =
-        reduced || Math.hypot(vx, vz) < 0.4
-          ? 0
-          : Math.sin(distWalk * 9) * (still ? 0.01 : 0.028);
+        reduced || Math.hypot(vx, vz) < 0.4 ? 0 : Math.sin(distWalk * 9) * (still ? 0.01 : 0.028);
       const sway = reduced ? 0 : Math.sin(t * 0.8) * (still ? 0.001 : zoom ? 0.006 : 0.004);
       const shakeOn = st.shake && !reduced;
       const shake = (shakeOn ? trauma * trauma : 0) + (exhausted > 0 ? 0.18 : 0);
@@ -485,6 +528,12 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
       camera.rotation.y = yaw + recoilY + sway;
       const breath = reduced || still ? 0 : Math.sin(t * 1.05) * (zoom ? 0.01 : 0.003);
       camera.rotation.x = pitch + recoilP + breath;
+      // Working the bolt: the scope dips and resettles over the cycle.
+      if (!reduced && boltT < 1.05) {
+        const k = boltT / 1.05;
+        camera.rotation.x += -Math.sin(k * Math.PI) * 0.02;
+        camera.rotation.y += Math.sin(k * Math.PI * 2) * 0.004 * (1 - k);
+      }
       camera.rotation.z = (Math.random() - 0.5) * shake * 0.012;
       const targetFov = zoom || isDown("KeyC") ? FOV_ZOOM * (still ? 0.92 : 1) : FOV_HIP;
       fov += (targetFov - fov) * (1 - Math.exp(-10 * dt));
@@ -496,6 +545,16 @@ export async function createGame(canvas: HTMLCanvasElement): Promise<GameHandle>
 
     ir.intensity = 40 + Math.sin(t * 1.7) * 1.2 + flash * 28;
     bulb.intensity = 1.35 + flash * 10;
+    tickFlash(dt);
+    const lf = getFlash();
+    if (lf > 0.55 && prevFlash <= 0.55) {
+      // A strike startles the barn: scatter at two random points.
+      mice.startle(px + (Math.random() - 0.5) * 12, pz + (Math.random() - 0.5) * 12, 7);
+      mice.startle(px + (Math.random() - 0.5) * 12, pz + (Math.random() - 0.5) * 12, 7);
+    }
+    prevFlash = lf;
+    bolt.intensity = lf * 9;
+    hemi.intensity = 0.22 + lf * 0.9;
     const fog = scene.fog as THREE.FogExp2 | null;
     if (fog) fog.density = 0.019 + getStorm() * 0.008;
     setMasterMuted(store.getState().muted);

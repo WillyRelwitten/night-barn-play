@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Volume2, VolumeX } from "lucide-react";
 import { unlockAudio, setMasterMuted } from "./audio";
 import { useGameStore } from "./store";
@@ -49,6 +49,9 @@ export function NightBarn() {
   useEffect(() => {
     if (!hitAt) return;
     setHitOn(true);
+    if (useGameStore.getState().isTouch && typeof navigator.vibrate === "function") {
+      navigator.vibrate(15);
+    }
     const t = window.setTimeout(() => setHitOn(false), 120);
     return () => window.clearTimeout(t);
   }, [hitAt]);
@@ -81,14 +84,7 @@ export function NightBarn() {
       />
       <div className="nv-scan pointer-events-none absolute inset-0 opacity-25 mix-blend-multiply" />
       <div className="nv-scope pointer-events-none absolute inset-0" />
-      <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.14] mix-blend-overlay" aria-hidden>
-        <filter id="nv-noise">
-          <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch">
-            <animate attributeName="seed" values="1;18;1" dur="0.28s" repeatCount="indefinite" />
-          </feTurbulence>
-        </filter>
-        <rect className="nv-grain" width="100%" height="100%" filter="url(#nv-noise)" />
-      </svg>
+      <GrainOverlay />
 
       <ScopeReticle visible={phase === "playing"} hot={hitOn} />
 
@@ -142,12 +138,20 @@ export function NightBarn() {
               style={{ animationDelay: "90ms" }}
             >
               A dark barn full of unaware mice. No fail. Just the scope.
+              <br />
+              <span className="text-primary/90">They freeze in the light — take the shot.</span>
             </p>
-            <p className="motion-rise mt-3 font-display text-2xl tracking-[0.16em] text-primary tabular-nums" style={{ animationDelay: "110ms" }}>
+            <p
+              className="motion-rise mt-3 font-display text-2xl tracking-[0.16em] text-primary tabular-nums"
+              style={{ animationDelay: "110ms" }}
+            >
               {kills} taken
             </p>
 
-            <div className="motion-rise mt-8 flex w-full flex-col items-center gap-3" style={{ animationDelay: "140ms" }}>
+            <div
+              className="motion-rise mt-8 flex w-full flex-col items-center gap-3"
+              style={{ animationDelay: "140ms" }}
+            >
               <button
                 type="button"
                 onClick={phase === "paused" ? resume : enter}
@@ -187,6 +191,32 @@ export function NightBarn() {
         </div>
       )}
     </main>
+  );
+}
+
+/** Cheap film grain: a static noise tile whose position jumps in steps.
+ *  Replaces the SVG feTurbulence filter, which re-renders every frame. */
+function GrainOverlay() {
+  const url = useMemo(() => {
+    const s = 128;
+    const cnv = document.createElement("canvas");
+    cnv.width = cnv.height = s;
+    const g = cnv.getContext("2d")!;
+    const img = g.createImageData(s, s);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = (Math.random() * 255) | 0;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    return cnv.toDataURL();
+  }, []);
+  return (
+    <div
+      aria-hidden
+      className="nv-grain pointer-events-none absolute inset-0 mix-blend-overlay"
+      style={{ backgroundImage: `url(${url})` }}
+    />
   );
 }
 
@@ -248,8 +278,7 @@ function ScopeSettings({
         className="flex min-h-11 w-full items-center justify-between rounded-sm px-0 font-sans text-[0.7rem] tracking-[0.12em] text-muted uppercase hover:text-fg"
         onClick={() => useGameStore.getState().setInvertY(!invertY)}
       >
-        Invert Y
-        <span className="text-fg/80">{invertY ? "On" : "Off"}</span>
+        Invert Y<span className="text-fg/80">{invertY ? "On" : "Off"}</span>
       </button>
       <button
         type="button"
@@ -319,7 +348,9 @@ function TouchControls({
       >
         <div
           className="absolute left-1/2 top-1/2 size-11 -translate-x-1/2 -translate-y-1/2 rounded-full border border-primary/50 bg-primary/20"
-          style={{ transform: `translate(calc(-50% + ${knob.x * 34}px), calc(-50% + ${knob.y * 34}px))` }}
+          style={{
+            transform: `translate(calc(-50% + ${knob.x * 34}px), calc(-50% + ${knob.y * 34}px))`,
+          }}
         />
       </div>
       <button

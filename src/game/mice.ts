@@ -178,7 +178,7 @@ function rand(a: number, b: number) {
 
 function wrapAngle(a: number) {
   const t = Math.PI * 2;
-  return ((a + Math.PI) % t + t) % t - Math.PI;
+  return ((((a + Math.PI) % t) + t) % t) - Math.PI;
 }
 
 function lerpAng(a: number, b: number, t: number) {
@@ -217,7 +217,11 @@ function nvMat(src: THREE.Material): THREE.MeshLambertMaterial {
   return mat;
 }
 
-function instantiateGlb(template: THREE.Group, hitGeo: THREE.SphereGeometry, hitMat: THREE.MeshBasicMaterial) {
+function instantiateGlb(
+  template: THREE.Group,
+  hitGeo: THREE.SphereGeometry,
+  hitMat: THREE.MeshBasicMaterial,
+) {
   const root = template.clone(true);
   const flashMats: THREE.MeshLambertMaterial[] = [];
   root.traverse((o) => {
@@ -273,12 +277,15 @@ export function createMice(
   fur: THREE.Texture | null,
   perches: Array<{ x: number; y: number; z: number; yaw: number }>,
   template: THREE.Group | null,
+  onHero?: () => void,
 ) {
   const assets = makeAssets();
   const mice: Mouse[] = [];
   const hitMeshes: THREE.Object3D[] = [];
   let heroId = -1;
   let heroWait = rand(2.5, 6);
+  // Session wariness 0..1: the barn learns. Set via setWary by the engine.
+  let waryLevel = 0;
 
   const pickPos = (avoidX?: number, avoidZ?: number, minDist = 0) => {
     for (let n = 0; n < 30; n++) {
@@ -308,7 +315,11 @@ export function createMice(
 
   function spawnInto(m: Mouse, avoidX?: number, avoidZ?: number) {
     if (m.id === heroId) heroId = -1;
-    const p = Math.random() < 0.72 ? pickCover(avoidX, avoidZ, 6.5) : pickPos(avoidX, avoidZ, 7);
+    const keep = 3.5 * waryLevel;
+    const p =
+      Math.random() < 0.72
+        ? pickCover(avoidX, avoidZ, 6.5 + keep)
+        : pickPos(avoidX, avoidZ, 7 + keep);
     m.x = p.x;
     m.z = p.z;
     m.y = 0;
@@ -428,6 +439,7 @@ export function createMice(
     m.targetX = m.x;
     m.targetZ = m.z;
     heroId = m.id;
+    onHero?.();
   }
 
   function inBeam(
@@ -443,7 +455,9 @@ export function createMice(
     const dz = m.z - playerZ;
     const len = Math.hypot(dx, dy, dz);
     if (len < 1.5 || len > 28) return false;
-    const ang = Math.acos(THREE.MathUtils.clamp((dx * look.x + dy * look.y + dz * look.z) / len, -1, 1));
+    const ang = Math.acos(
+      THREE.MathUtils.clamp((dx * look.x + dy * look.y + dz * look.z) / len, -1, 1),
+    );
     const tight = zoomed ? 0.09 : 0.13;
     if (m.state === "freeze") return ang < 0.22;
     return ang < tight;
@@ -505,7 +519,8 @@ export function createMice(
           m.state = "freeze";
           m.speed = 0;
         }
-        m.timer = 0.35;
+        // Wary mice hold the freeze for less time.
+        m.timer = 0.35 * (1 - 0.65 * waryLevel);
       } else if (m.state === "freeze" && !watched) {
         setState(m, m.resume, rand(0.4, 1.2));
       }
@@ -515,7 +530,8 @@ export function createMice(
       if (m.timer <= 0 && m.state !== "freeze") {
         const r = Math.random();
         if (m.state === "idle") setState(m, r < 0.7 ? "walk" : "nibble", rand(0.8, 2.4));
-        else if (m.state === "nibble") setState(m, r < 0.22 ? "dart" : "walk", rand(0.4, 2));
+        else if (m.state === "nibble")
+          setState(m, r < 0.22 + 0.35 * waryLevel ? "dart" : "walk", rand(0.4, 2));
         else if (m.state === "dart") setState(m, "idle", rand(0.5, 1.4));
         else if (m.state === "hero") {
           setState(m, "walk", rand(0.8, 1.6));
@@ -523,7 +539,8 @@ export function createMice(
         } else setState(m, r < 0.12 ? "dart" : r < 0.45 ? "idle" : "nibble", rand(0.5, 1.8));
       }
 
-      const want = m.state === "dart" ? 1.55 : m.state === "walk" ? 0.38 : 0;
+      const want =
+        m.state === "dart" ? 1.55 * (1 + 0.6 * waryLevel) : m.state === "walk" ? 0.38 : 0;
       m.speed += (want - m.speed) * Math.min(1, dt * 6);
 
       if (m.speed > 0.02) {
@@ -562,7 +579,8 @@ export function createMice(
       else if (m.state === "freeze") head.rotation.x = Math.sin(m.anim * 0.35) * 0.03;
       else head.rotation.x = Math.sin(m.anim * 0.7) * 0.08;
       const tail = m.group.userData.tail as THREE.Mesh;
-      const tailAmp = m.state === "freeze" ? 0.08 : m.state === "hero" ? 0.18 : template ? 0.22 : 0.45;
+      const tailAmp =
+        m.state === "freeze" ? 0.08 : m.state === "hero" ? 0.18 : template ? 0.22 : 0.45;
       tail.rotation.y = Math.sin(m.anim * (m.state === "freeze" ? 0.6 : 1.6)) * tailAmp;
       gait(m);
     }
@@ -624,7 +642,17 @@ export function createMice(
     assets.hitMat.dispose();
   }
 
-  return { mice, hitMeshes, update, kill, startle, dispose };
+  return {
+    mice,
+    hitMeshes,
+    update,
+    kill,
+    startle,
+    dispose,
+    setWary: (v: number) => {
+      waryLevel = Math.min(1, Math.max(0, v));
+    },
+  };
 }
 
 export function randomBarnPoint() {

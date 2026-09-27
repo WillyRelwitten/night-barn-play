@@ -38,6 +38,9 @@
   .motion-rise {
     animation: none !important;
   }
+  .nv-grain {
+    animation: none !important;
+  }
 }
 
 @keyframes rise {
@@ -78,4 +81,25 @@
     rgb(0 0 0 / 82%) 92%,
     rgb(0 0 0 / 100%) 100%
   );
+}
+
+/* Static noise tile, position jumped in steps: cheap animated grain. */
+.nv-grain {
+  opacity: 0.14;
+  animation: grain-shift 0.9s steps(3) infinite;
+}
+
+@keyframes grain-shift {
+  0% {
+    background-position: 0 0;
+  }
+  33% {
+    background-position: 38px 22px;
+  }
+  66% {
+    background-position: -24px 44px;
+  }
+  100% {
+    background-position: 0 0;
+  }
 }

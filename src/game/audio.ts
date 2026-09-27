@@ -6,6 +6,7 @@ let noise: AudioBuffer | null = null;
 let lastSkitter = 0;
 let rainGain: GainNode | null = null;
 let storm = 0;
+let flashV = 0;
 let timers: number[] = [];
 
 function now() {
@@ -32,7 +33,13 @@ function makeNoise(duration: number) {
   return buf;
 }
 
-function envGain(peak: number, attack: number, decay: number, bus: GainNode | null = sfx, when = now()) {
+function envGain(
+  peak: number,
+  attack: number,
+  decay: number,
+  bus: GainNode | null = sfx,
+  when = now(),
+) {
   if (!ctx || !bus) return null;
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, when);
@@ -164,40 +171,55 @@ function startAmbient() {
 
 function scheduleCricket() {
   if (!ctx) return;
-  later(() => {
-    if (ctx && ctx.state === "running") {
-      playTone(3900 + Math.random() * 700, 0.016, 0.04, "sine");
-      later(() => playTone(4200 + Math.random() * 200, 0.01, 0.035, "sine"), 55 + Math.random() * 40);
-      if (Math.random() < 0.4) later(() => playTone(4500, 0.008, 0.03, "sine"), 140);
-    }
-    scheduleCricket();
-  }, 1600 + Math.random() * 3800);
+  later(
+    () => {
+      if (ctx && ctx.state === "running") {
+        playTone(3900 + Math.random() * 700, 0.016, 0.04, "sine");
+        later(
+          () => playTone(4200 + Math.random() * 200, 0.01, 0.035, "sine"),
+          55 + Math.random() * 40,
+        );
+        if (Math.random() < 0.4) later(() => playTone(4500, 0.008, 0.03, "sine"), 140);
+      }
+      scheduleCricket();
+    },
+    1600 + Math.random() * 3800,
+  );
 }
 
 function scheduleCreak() {
   if (!ctx) return;
-  later(() => {
-    if (ctx && ctx.state === "running") {
-      playNoise(0.45, 0.035, 160, 2.4, "bandpass", 0.55, now(), amb);
-    }
-    scheduleCreak();
-  }, 7000 + Math.random() * 12000);
+  later(
+    () => {
+      if (ctx && ctx.state === "running") {
+        playNoise(0.45, 0.035, 160, 2.4, "bandpass", 0.55, now(), amb);
+      }
+      scheduleCreak();
+    },
+    7000 + Math.random() * 12000,
+  );
 }
 
 function scheduleSkitter() {
   if (!ctx) return;
-  later(() => {
-    if (ctx && ctx.state === "running" && Math.random() < 0.55) playSkitter();
-    scheduleSkitter();
-  }, 2800 + Math.random() * 7000);
+  later(
+    () => {
+      if (ctx && ctx.state === "running" && Math.random() < 0.55) playSkitter();
+      scheduleSkitter();
+    },
+    2800 + Math.random() * 7000,
+  );
 }
 
 function scheduleOwl() {
   if (!ctx) return;
-  later(() => {
-    if (ctx && ctx.state === "running") playOwl();
-    scheduleOwl();
-  }, 16000 + Math.random() * 28000);
+  later(
+    () => {
+      if (ctx && ctx.state === "running") playOwl();
+      scheduleOwl();
+    },
+    16000 + Math.random() * 28000,
+  );
 }
 
 function playOwl() {
@@ -239,32 +261,57 @@ function playThunder() {
 
 function scheduleStorm(first = false) {
   if (!ctx || !rainGain) return;
-  later(() => {
-    if (!ctx || !rainGain) {
+  later(
+    () => {
+      if (!ctx || !rainGain) {
+        scheduleStorm();
+        return;
+      }
+      const dur = 18000 + Math.random() * 22000;
+      storm = 1;
+      rainGain.gain.setTargetAtTime(0.085 + Math.random() * 0.04, ctx.currentTime, 1.8);
+      // Lightning: flash first, thunder follows after a "distance" delay.
+      const scheduleBolt = (thunderDelay: number) => {
+        const flashDelay = Math.max(60, thunderDelay - (400 + Math.random() * 1500));
+        later(() => {
+          flashV = 0.75 + Math.random() * 0.25;
+        }, flashDelay);
+        later(() => {
+          flashV = Math.max(flashV, 0.45);
+        }, flashDelay + 110);
+        later(() => playThunder(), thunderDelay);
+      };
+      scheduleBolt(1200 + Math.random() * 4000);
+      if (Math.random() < 0.7) scheduleBolt(7000 + Math.random() * 8000);
+      later(() => {
+        storm = 0;
+        if (rainGain && ctx) rainGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 2.4);
+      }, dur);
       scheduleStorm();
-      return;
-    }
-    const dur = 18000 + Math.random() * 22000;
-    storm = 1;
-    rainGain.gain.setTargetAtTime(0.085 + Math.random() * 0.04, ctx.currentTime, 1.8);
-    later(() => playThunder(), 1200 + Math.random() * 4000);
-    if (Math.random() < 0.7) later(() => playThunder(), 7000 + Math.random() * 8000);
-    later(() => {
-      storm = 0;
-      if (rainGain && ctx) rainGain.gain.setTargetAtTime(0.0001, ctx.currentTime, 2.4);
-    }, dur);
-    scheduleStorm();
-  }, (first ? 12000 : 38000) + Math.random() * (first ? 9000 : 50000));
+    },
+    (first ? 12000 : 38000) + Math.random() * (first ? 9000 : 50000),
+  );
 }
 
 export function getStorm() {
   return storm;
 }
 
+/** Current lightning flash intensity, 0..1. Decays via tickFlash. */
+export function getFlash() {
+  return flashV;
+}
+
+export function tickFlash(dt: number) {
+  flashV = Math.max(0, flashV - dt * 2.4);
+}
+
 export function unlockAudio() {
   if (typeof window === "undefined") return;
   if (!ctx) {
-    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const AC =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     ctx = new AC({ latencyHint: "interactive" });
     master = ctx.createGain();
     sfx = ctx.createGain();
@@ -328,11 +375,27 @@ export function playImpact() {
 }
 
 export function playStep() {
-  playNoise(0.055, 0.06 + Math.random() * 0.025, 210 + Math.random() * 50, 1.2, "bandpass", 0.65 + Math.random() * 0.25);
+  playNoise(
+    0.055,
+    0.06 + Math.random() * 0.025,
+    210 + Math.random() * 50,
+    1.2,
+    "bandpass",
+    0.65 + Math.random() * 0.25,
+  );
 }
 
 export function playFloorboard() {
-  playNoise(0.22, 0.055, 140 + Math.random() * 40, 2.1, "bandpass", 0.42 + Math.random() * 0.12, now(), amb);
+  playNoise(
+    0.22,
+    0.055,
+    140 + Math.random() * 40,
+    2.1,
+    "bandpass",
+    0.42 + Math.random() * 0.12,
+    now(),
+    amb,
+  );
   playTone(90 + Math.random() * 25, 0.03, 0.16, "sine", -20, now(), amb);
 }
 
@@ -342,4 +405,13 @@ export function playSkitter() {
   lastSkitter = t;
   playNoise(0.045, 0.045, 3400 + Math.random() * 800, 1.3, "highpass", 1.4 + Math.random() * 0.4);
   playTone(2400 + Math.random() * 900, 0.018, 0.03, "sine", -400);
+}
+
+/** Soft cue when a mouse claims a high perch: faint claws on wood, distant squeak. */
+export function playPerch() {
+  if (!ctx || !amb) return;
+  const t = now();
+  playNoise(0.03, 0.035, 900, 1.4, "bandpass", 0.9, t, amb);
+  playNoise(0.03, 0.028, 1100, 1.4, "bandpass", 1.1, t + 0.14, amb);
+  playTone(2600, 0.014, 0.05, "sine", 500, t + 0.3, amb);
 }
