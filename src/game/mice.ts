@@ -263,6 +263,13 @@ export async function loadMouseTemplate(): Promise<THREE.Group | null> {
     const mouse = named(gltf.scene, "Mouse") as THREE.Group | undefined;
     const root = mouse ?? gltf.scene;
     root.updateMatrixWorld(true);
+    // Rest the feet on the floor: the rat model's paws dip below y=0. The root's
+    // own position is overwritten per frame, so lift its children instead.
+    const minY = new THREE.Box3().setFromObject(root).min.y;
+    if (Number.isFinite(minY) && Math.abs(minY) > 1e-4) {
+      for (const c of root.children) c.position.y -= minY;
+      root.updateMatrixWorld(true);
+    }
     return root;
   } catch {
     return null;
